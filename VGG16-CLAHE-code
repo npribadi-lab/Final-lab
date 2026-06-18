@@ -1,0 +1,210 @@
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import backend as K
+from tensorflow.keras.layers import Dense, Activation,Dropout,Conv2D, MaxPooling2D,BatchNormalization, Flatten,Input
+from tensorflow.keras.optimizers import Adam, Adamax
+from tensorflow.keras.metrics import categorical_crossentropy
+from tensorflow.keras import regularizers
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Model, load_model, Sequential
+from keras.callbacks import ModelCheckpoint
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+from matplotlib.pyplot import imshow
+import os
+import seaborn as sns
+sns.set_style('darkgrid')
+from sklearn.metrics import confusion_matrix, classification_report
+from IPython.display import display, HTML
+import pickle
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+# === KONFIGURASI FOLDER ===
+sdir = '/content/drive/MyDrive' 
+test_dir = '/content/drive/MyDrive'
+
+# === READ DATA TRAIN+VALID  sdir ===
+filepaths = []
+labels = []
+classlist = os.listdir(sdir)
+for klass in classlist:
+    classpath = os.path.join(sdir, klass)
+    if os.path.isdir(classpath):
+        flist = os.listdir(classpath)
+        for f in flist:
+            fpath = os.path.join(classpath, f)
+            filepaths.append(fpath)
+            labels.append(klass)
+
+Fseries = pd.Series(filepaths, name='filepaths')
+Lseries = pd.Series(labels, name='labels')
+df = pd.concat([Fseries, Lseries], axis=1)
+print("Data train+valid (total 371 gambar):")
+print(df.head())
+print(df['labels'].value_counts())
+
+# === BAGI TRAIN (330) DAN VALID (41) ===
+train_df, valid_df = train_test_split(df, train_size=330, stratify=df['labels'], random_state=123)
+print(f'\ntrain_df length: {len(train_df)}')
+print(f'valid_df length: {len(valid_df)}')
+print(f'Total: {len(train_df)+len(valid_df)}')
+
+# === PARAMETER GENERATOR (dengan urutan kelas no_TO=0, TO=1) ===
+height, width = 224, 224
+batch_size = 64
+img_size = (height, width)
+
+test_batch_size = 41
+test_steps = int(41 / test_batch_size)
+
+# Generator training
+train_gen = ImageDataGenerator(rescale=1./255).flow_from_dataframe(
+    train_df, x_col='filepaths', y_col='labels', target_size=img_size,
+    class_mode='categorical', color_mode='rgb', shuffle=True, batch_size=batch_size,
+    classes=['no_TO', 'TO']
+)
+
+# Generator validasi
+valid_gen = ImageDataGenerator(rescale=1./255).flow_from_dataframe(
+    valid_df, x_col='filepaths', y_col='labels', target_size=img_size,
+    class_mode='categorical', color_mode='rgb', shuffle=False, batch_size=batch_size,
+    classes=['no_TO', 'TO']
+)
+
+# Generator test
+test_gen = ImageDataGenerator(rescale=1./255).flow_from_directory(
+    test_dir, target_size=img_size, class_mode='categorical',
+    color_mode='rgb', shuffle=False, batch_size=test_batch_size,
+    classes=['no_TO', 'TO']
+)
+
+classes = list(train_gen.class_indices.keys())
+print("\nKelas:", classes)   # ['no_TO', 'TO']
+print(f"Jumlah kelas: {len(classes)}")
+
+# === ARSITEKTUR MODEL VGG16 ===
+base_model = tf.keras.applications.VGG16(include_top=False, weights="imagenet", input_tensor=Input(shape=(224,224,3)))
+
+base_model.trainable = False   # freeze seluruh base model
+
+model = tf.keras.Sequential([
+    base_model,
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(4096, activation='relu'),
+    tf.keras.layers.Dense(4096, activation='relu'),
+    tf.keras.layers.Dense(2, activation='softmax')
+])
+
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
+
+# === TRAINING & SIMPAN MODEL + HISTORY ===
+epochs = 25
+history = model.fit(x=train_gen, epochs=epochs, validation_data=valid_gen, verbose=1)
+
+# Simpan model setelah training selesai
+model_save_path = '/content/drive/MyDrive/TGS=16/Fix_CL=3, TGS=16/model_CL3_TGS16.h5'
+model.save(model_save_path)
+print(f"\nModel telah disimpan di {model_save_path}")
+
+# Simpan history ke file pickle
+history_save_path = '/content/drive/MyDrive/TGS=16/Fix_CL=3, TGS=16/history_CL3_TGS16.pkl'
+with open(history_save_path, 'wb') as f:
+    pickle.dump(history.history, f)
+print(f"History disimpan di {history_save_path}")
+
+# === PLOT GRAFIK TRAINING ===
+def tr_plot(history_dict, option=0):
+    """
+    Menampilkan grafik training dengan anotasi pada epoch terakhir.
+    option: 0 = accuracy & loss, 1 = accuracy only, 2 = loss only
+    """
+    epochs = range(1, len(history_dict['accuracy']) + 1)
+
+    # ========== GRAFIK AKURASI ==========
+    if option == 0 or option == 1:
+        plt.figure(figsize=(12,4))
+        plt.subplot(1,2,1)
+        plt.plot(epochs, history_dict['accuracy'], 'b-', label='Training accuracy')
+        plt.plot(epochs, history_dict['val_accuracy'], 'r-', label='Validation accuracy')
+
+        # Ambil nilai pada epoch terakhir
+        last_epoch = len(history_dict['accuracy'])
+        last_train_acc = history_dict['accuracy'][-1]
+        last_val_acc = history_dict['val_accuracy'][-1]
+
+        # Dot untuk validation accuracy (merah) dan training accuracy (biru) di epoch terakhir
+        plt.scatter(last_epoch, last_val_acc, color='red', s=80, zorder=5)
+        plt.scatter(last_epoch, last_train_acc, color='blue', s=80, zorder=5, marker='o')
+
+        # Teks validation accuracy di BAWAH dot
+        plt.text(last_epoch, last_val_acc - 0.02, f'{last_val_acc:.3f}',
+                 ha='center', va='top', fontsize=9, family='Times New Roman')
+        # Teks training accuracy di ATAS dot
+        plt.text(last_epoch, last_train_acc + 0.01, f'{last_train_acc:.3f}',
+                 ha='center', va='bottom', fontsize=9, family='Times New Roman', color='blue')
+
+        plt.title('Training and Validation Accuracy (Last Epoch)')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        print(f"Training accuracy pada epoch terakhir ({last_epoch}): {last_train_acc:.4f}")
+        print(f"Validation accuracy pada epoch terakhir : {last_val_acc:.4f}")
+
+    # ========== GRAFIK LOSS ==========
+    if option == 0 or option == 2:
+        if option == 0:
+            plt.subplot(1,2,2)
+        else:
+            plt.figure(figsize=(6,4))
+
+        plt.plot(epochs, history_dict['loss'], 'b-', label='Training loss')
+        plt.plot(epochs, history_dict['val_loss'], 'r-', label='Validation loss')
+
+        last_epoch = len(history_dict['loss'])
+        last_train_loss = history_dict['loss'][-1]
+        last_val_loss = history_dict['val_loss'][-1]
+
+        # Dot untuk validation loss (merah) di epoch terakhir
+        plt.scatter(last_epoch, last_val_loss, color='red', s=80, zorder=5)
+        # Teks validation loss di ATAS dot (offset +0.2)
+        plt.text(last_epoch, last_val_loss + 0.5, f'{last_val_loss:.3f}',
+                 ha='center', va='bottom', fontsize=9, family='Times New Roman')
+
+        plt.title('Training and Validation Loss (Last Epoch)')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        print(f"Validation loss pada epoch terakhir  : {last_val_loss:.4f}")
+
+    plt.tight_layout()
+    plt.show()
+
+tr_plot(history_dict, option=0)   # tampilkan accuracy dan loss
+
+# === EVALUASI PADA TEST SET ===
+print("\nEvaluasi pada test set...")
+acc = model.evaluate(test_gen, steps=test_steps, verbose=1)[1] * 100
+print(f"Accuracy on test set: {acc:.2f} %")
+
+# === PREDIKSI DAN CLASSIFICATION REPORT + CONFUSION MATRIX ===
+preds = model.predict(test_gen, steps=test_steps)
+y_true = test_gen.labels          # no_TO=0, TO=1
+y_pred = np.argmax(preds, axis=1)
+
+kelas_tampilan = ['no_TO', 'TO']
+
+cm = confusion_matrix(y_true, y_pred)
+plt.figure(figsize=(6,5))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=kelas_tampilan, yticklabels=kelas_tampilan)
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('Confusion Matrix - Test Set')
+plt.show()
+
+print("\nClassification Report:\n----------------------")
+print(classification_report(y_true, y_pred, target_names=kelas_tampilan))
