@@ -24,8 +24,8 @@ from google.colab import drive
 drive.mount('/content/drive')
 
 # === KONFIGURASI FOLDER === 
-sdir = '/content/drive/MyDrive/SkripsiOASYS/dataset gamma correction/benar 0,8/FIX 0,8/TrainVal' 
-test_dir = '/content/drive/MyDrive/SkripsiOASYS/dataset gamma correction/benar 0,8/FIX 0,8/Test
+sdir = '/content/drive/MyDrive' 
+test_dir = '/content/drive/MyDrive'
 
 # === MEMBACA DATA TRAIN+VALID DARI sdir ===
 filepaths = []
@@ -109,12 +109,12 @@ epochs = 25
 history = model.fit(x=train_gen, epochs=epochs, validation_data=valid_gen, verbose=1)
 
 # Simpan model setelah training selesai
-model_save_path = '/content/drive/MyDrive/SkripsiOASYS/dataset gamma correction/benar 0,8/FIX 0,8/modelfix_gama08.h5'  # ganti sesuai keinginan
+model_save_path = '/content/drive/MyDrive/FIX 0,8/modelfix_gama08.h5'
 model.save(model_save_path)
 print(f"\nModel telah disimpan di {model_save_path}")
 
 # Simpan history ke file pickle
-history_save_path = '/content/drive/MyDrive/SkripsiOASYS/dataset gamma correction/benar 0,8/FIX 0,8/historyfix_gama08.pkl'
+history_save_path = '/content/drive/MyDrive/FIX 0,8/historyfix_gama08.pkl'
 with open(history_save_path, 'wb') as f:
     pickle.dump(history.history, f)
 print(f"History disimpan di {history_save_path}")
